@@ -1,1 +1,10 @@
+// Add to your NavMenu 
+<NavMenu> 
+ <Link to="/app" rel="home">SEO Dashboard</Link> 
+ <Link to="/app/meta-editor">Meta Tags Editor</Link> 
+ <Link to="/app/seo-checker">SEO Checker</Link> 
+ <Link to="/app/sitemap">Sitemap</Link> 
+</NavMenu> 
+ 
 
+ 
