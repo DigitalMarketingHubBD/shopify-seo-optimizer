@@ -1,28 +1,23 @@
 import { useState } from "react"; 
-import { useLoaderData, useFetcher } from "@remix-run/react"; 
+import { useLoaderData } from "@remix-run/react"; 
 import { authenticate } from "../shopify.server"; 
 import { 
  Page, Layout, Card, BlockStack, Text, 
- Select, Button, Badge 
+ 
+
+ 
+
+ TextField, Button, DataTable, Select 
 } from "@shopify/polaris"; 
 import { json } from "@remix-run/node"; 
  
 export const loader = async ({ request }) => { 
-const { admin } = await authenticate.admin(request); 
+ const { admin } = await authenticate.admin(request); 
  const response = await admin.graphql(` 
    query { 
      products(first: 20) { 
        edges { 
-         node { 
-           id title handle 
-           description 
-           priceRangeV2 { 
-             minVariantPrice { amount currencyCode } 
-           } 
-           images(first: 1) { 
-             edges { node { url } } 
-           } 
-         } 
+         node { id title description bodyHtml } 
        } 
      } 
    } 
@@ -31,62 +26,77 @@ const { admin } = await authenticate.admin(request);
  return json({ products: data.data.products.edges.map(e => e.node) }); 
 }; 
  
-export default function StructuredData() { 
+function analyzeKeywords(text) { 
+ if (!text) return []; 
+ const clean = text.replace(/<[^>]+>/g, "").toLowerCase(); 
+ const words = clean.match(/\b[a-z]{3,}\b/g) || []; 
+ const freq = {}; 
+ words.forEach(w => { freq[w] = (freq[w] || 0) + 1; }); 
+ return Object.entries(freq) 
+   .sort((a, b) => b[1] - a[1]) 
+   .slice(0, 20) 
+   .map(([word, count]) => ({ 
+     word, 
+     count, 
+     density: ((count / words.length) * 100).toFixed(2) + "%" 
+   })); 
+} 
+ 
+export default function Keywords() { 
  const { products } = useLoaderData(); 
  const [selected, setSelected] = useState(products[0]?.id); 
+ const [targetKeyword, setTargetKeyword] = useState(""); 
  
  const product = products.find(p => p.id === selected); 
+ const keywords = analyzeKeywords(product?.bodyHtml || product?.description); 
  
- const jsonLD = product ? JSON.stringify({ 
-   "@context": "https://schema.org/", 
-   "@type": "Product", 
-   "name": product.title, 
-   "description": product.description, 
-   "image": product.images.edges[0]?.node.url, 
-   "url": `https://yourstore.com/products/${product.handle}`, 
-   "offers": { 
-     "@type": "Offer", 
-     "price": product.priceRangeV2.minVariantPrice.amount, 
-     "priceCurrency": product.priceRangeV2.minVariantPrice.currencyCode, 
-     "availability": "https://schema.org/InStock" 
-   } 
- }, null, 2) : ""; 
+ const targetCount = keywords.find(k => k.word === targetKeyword.toLowerCase()); 
  
- const copyScript = () => { 
-   const script = `<script type="application/ld+json">\n${jsonLD}\n</script>`; 
-   navigator.clipboard.writeText(script); 
- }; 
+ const rows = keywords.map(k => [ 
+   k.word, 
+   k.count.toString(), 
+   k.density, 
+   k.word === targetKeyword.toLowerCase() 
+     ? <Text tone="success">🎯 Target</Text> 
+     : "" 
+ ]); 
  
  return ( 
-   <Page title="JSON-LD Structured Data"> 
+   <Page title="Keyword Density Checker"> 
      <Layout> 
        <Layout.Section> 
          <Card> 
            <BlockStack gap="400"> 
-             <Text variant="headingMd">Generate Product Schema Markup</Text> 
              <Select 
                label="Select Product" 
                options={products.map(p => ({ label: p.title, value: p.id }))} 
                onChange={setSelected} 
                value={selected} 
              /> 
-             <Badge tone="success">✅ Schema.org Product Type</Badge> 
-             <div style={{ background: "#1e1e1e", padding: "16px", borderRadius: "8px" }}> 
-               <pre style={{ color: "#d4d4d4", fontSize: "12px", margin: 0, overflow: "auto" }}> 
-                 {jsonLD} 
-               </pre> 
-             </div> 
-             <Button variant="primary" onClick={copyScript}> 
-               📋 Copy Script Tag 
-             </Button> 
-             <Text tone="subdued"> 
-               Paste this inside your theme's {"<head>"} tag or use a Script Tag API to inject it automatically. 
-             </Text> 
+             <TextField 
+               label="Target Keyword" 
+               value={targetKeyword} 
+               onChange={setTargetKeyword} 
+               placeholder="e.g. running shoes" 
+               helpText="Check how often your target keyword appears" 
+             /> 
+             {targetKeyword && ( 
+               <Text tone={targetCount ? "success" : "critical"}> 
+                 {targetCount 
+                   ? `✅ "${targetKeyword}" appears ${targetCount.count} times (${targetCount.density})` 
+                   : `❌ "${targetKeyword}" not found in product description`} 
+               </Text> 
+             )} 
+             {rows.length > 0 && ( 
+               <DataTable 
+                 columnContentTypes={["text", "numeric", "text", "text"]} 
+                 headings={["Keyword", "Count", "Density", "Target"]} 
+                 rows={rows} 
+               /> 
+             )} 
            </BlockStack> 
          </Card> 
        </Layout.Section> 
      </Layout> 
    </Page> 
  ); 
-} 
- 
