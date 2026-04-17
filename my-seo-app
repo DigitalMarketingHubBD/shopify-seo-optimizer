@@ -1,10 +1,111 @@
-// Add to your NavMenu 
-<NavMenu> 
- <Link to="/app" rel="home">SEO Dashboard</Link> 
- <Link to="/app/meta-editor">Meta Tags Editor</Link> 
- <Link to="/app/seo-checker">SEO Checker</Link> 
- <Link to="/app/sitemap">Sitemap</Link> 
-</NavMenu> 
+import { useState } from "react"; 
+import { useLoaderData, useFetcher } from "@remix-run/react"; 
+import { authenticate } from "../shopify.server"; 
+import { 
+ Page, Layout, Card, TextField, Button, 
+BlockStack, Text, Thumbnail, InlineGrid 
+} from "@shopify/polaris"; 
+import { json } from "@remix-run/node"; 
+ 
+export const loader = async ({ request }) => { 
+ const { admin } = await authenticate.admin(request); 
+ const response = await admin.graphql(` 
+   query { 
+     products(first: 20) { 
+       edges { 
+         node { 
+           id 
+           title 
+           images(first: 5) { 
+             edges { 
+               node { 
+                 id 
+                 url 
+                 altText 
+               } 
+             } 
+           } 
+         } 
+       } 
+     } 
+   } 
+ `); 
+ const data = await response.json(); 
+ return json({ products: data.data.products.edges.map(e => e.node) }); 
+}; 
+ 
+export const action = async ({ request }) => { 
+ const { admin } = await authenticate.admin(request); 
+ const formData = await request.formData(); 
+ const imageId = formData.get("imageId"); 
+ const productId = formData.get("productId"); 
+ const altText = formData.get("altText"); 
+ 
+ await admin.graphql(` 
+   mutation updateProductImageAltText($productId: ID!, $image: ImageInput!) { 
+     productUpdateMedia(productId: $productId, media: [$image]) { 
+       media { 
+         ... on MediaImage { 
+           id 
+           image { altText } 
+         } 
+       } 
+       userErrors { field message } 
+     } 
+   } 
+ `, { 
+   variables: { 
+     productId, 
+     image: { id: imageId, altText } 
+   } 
+ }); 
+ 
+ return json({ success: true }); 
+}; 
+ 
+export default function AltTextEditor() { 
+ const { products } = useLoaderData(); 
+ const fetcher = useFetcher(); 
+ const [altTexts, setAltTexts] = useState({}); 
+ 
+ const handleAltChange = (imageId, value) => { 
+   setAltTexts(prev => ({ ...prev, [imageId]: value })); 
+ }; 
+ 
+ return ( 
+   <Page title="Image Alt Text Bulk Editor"> 
+     <Layout> 
+       {products.map(product => ( 
+         <Layout.Section key={product.id}> 
+           <Card> 
+             <BlockStack gap="400"> 
+               <Text variant="headingMd">{product.title}</Text> 
+               {product.images.edges.map(({ node: image }) => ( 
+                 <InlineGrid columns="auto 1fr auto" gap="300" key={image.id}> 
+                   <Thumbnail source={image.url} alt={image.altText || ""} size="medium" /> 
+                   <TextField 
+                     label="Alt Text" 
+                     value={altTexts[image.id] ?? image.altText ?? ""} 
+                     onChange={(val) => handleAltChange(image.id, val)} 
+                     placeholder="Describe this image for SEO..." 
+                   /> 
+                   <fetcher.Form method="post"> 
+                     <input type="hidden" name="imageId" value={image.id} /> 
+                     <input type="hidden" name="productId" value={product.id} /> 
+                     <input type="hidden" name="altText" value={altTexts[image.id] ?? image.altText ?? ""} /> 
+                     <Button submit variant="primary" size="slim">Save</Button> 
+                   </fetcher.Form> 
+                 </InlineGrid> 
+               ))} 
+             </BlockStack> 
+           </Card> 
+         </Layout.Section> 
+       ))} 
+     </Layout> 
+   </Page> 
+ ); 
+} 
+ 
  
 
  
