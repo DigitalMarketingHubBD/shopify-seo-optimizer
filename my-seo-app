@@ -1,111 +1,125 @@
 import { useState } from "react"; 
-import { useLoaderData, useFetcher } from "@remix-run/react"; 
+import { useLoaderData } from "@remix-run/react"; 
 import { authenticate } from "../shopify.server"; 
 import { 
- Page, Layout, Card, TextField, Button, 
-BlockStack, Text, Thumbnail, InlineGrid 
+ Page, Layout, Card, BlockStack, Text, 
+ Button, Badge, DataTable, Spinner 
 } from "@shopify/polaris"; 
 import { json } from "@remix-run/node"; 
  
 export const loader = async ({ request }) => { 
- const { admin } = await authenticate.admin(request); 
+const { admin } = await authenticate.admin(request); 
  const response = await admin.graphql(` 
    query { 
-     products(first: 20) { 
+     products(first: 50) { 
        edges { 
          node { 
            id 
            title 
-           images(first: 5) { 
-             edges { 
-               node { 
-                 id 
-                 url 
-                 altText 
-               } 
-             } 
-           } 
+           handle 
+           onlineStoreUrl 
+         } 
+       } 
+     } 
+     pages(first: 20) { 
+       edges { 
+         node { 
+           id 
+           title 
+           handle 
+           body 
          } 
        } 
      } 
    } 
  `); 
  const data = await response.json(); 
- return json({ products: data.data.products.edges.map(e => e.node) }); 
-}; 
- 
-export const action = async ({ request }) => { 
- const { admin } = await authenticate.admin(request); 
- const formData = await request.formData(); 
- const imageId = formData.get("imageId"); 
- const productId = formData.get("productId"); 
- const altText = formData.get("altText"); 
- 
- await admin.graphql(` 
-   mutation updateProductImageAltText($productId: ID!, $image: ImageInput!) { 
-     productUpdateMedia(productId: $productId, media: [$image]) { 
-       media { 
-         ... on MediaImage { 
-           id 
-           image { altText } 
-         } 
-       } 
-       userErrors { field message } 
-     } 
-   } 
- `, { 
-   variables: { 
-     productId, 
-     image: { id: imageId, altText } 
-   } 
+ return json({ 
+   products: data.data.products.edges.map(e => e.node), 
+   pages: data.data.pages.edges.map(e => e.node), 
  }); 
- 
- return json({ success: true }); 
 }; 
  
-export default function AltTextEditor() { 
- const { products } = useLoaderData(); 
- const fetcher = useFetcher(); 
- const [altTexts, setAltTexts] = useState({}); 
+// Check if a URL returns 404 
+async function checkUrl(url) { 
+ try { 
+   const res = await fetch(url, { method: "HEAD" }); 
+   return res.status; 
+ } catch { 
+   return "Error"; 
+ } 
+} 
  
- const handleAltChange = (imageId, value) => { 
-   setAltTexts(prev => ({ ...prev, [imageId]: value })); 
+export default function BrokenLinks() { 
+ const { products, pages } = useLoaderData(); 
+ const [scanning, setScanning] = useState(false); 
+ const [results, setResults] = useState([]); 
+ 
+ const scanLinks = async () => { 
+   setScanning(true); 
+   const checks = []; 
+ 
+   // Extract links from page bodies 
+   pages.forEach(page => { 
+     const matches = page.body?.match(/href="(https?:\/\/[^"]+)"/g) || []; 
+     matches.forEach(match => { 
+       const url = match.replace(/href="|"/g, ""); 
+       checks.push({ source: page.title, url }); 
+     }); 
+   }); 
+ 
+   // Check each URL 
+   const checkedResults = await Promise.all( 
+     checks.map(async ({ source, url }) => { 
+       const status = await checkUrl(url); 
+       return { source, url, status, broken: status === 404 || status === "Error" }; 
+     }) 
+   ); 
+ 
+   setResults(checkedResults); 
+   setScanning(false); 
  }; 
  
+ const rows = results.map(r => [ 
+   r.source, 
+   r.url.length > 40 ? r.url.substring(0, 40) + "..." : r.url, 
+   <Badge tone={r.broken ? "critical" : "success"}> 
+     {r.broken ? `❌ ${r.status}` : `✅ ${r.status}`} 
+   </Badge> 
+ ]); 
+ 
  return ( 
-   <Page title="Image Alt Text Bulk Editor"> 
+   <Page title="Broken Link Scanner"> 
      <Layout> 
-       {products.map(product => ( 
-         <Layout.Section key={product.id}> 
-           <Card> 
-             <BlockStack gap="400"> 
-               <Text variant="headingMd">{product.title}</Text> 
-               {product.images.edges.map(({ node: image }) => ( 
-                 <InlineGrid columns="auto 1fr auto" gap="300" key={image.id}> 
-                   <Thumbnail source={image.url} alt={image.altText || ""} size="medium" /> 
-                   <TextField 
-                     label="Alt Text" 
-                     value={altTexts[image.id] ?? image.altText ?? ""} 
-                     onChange={(val) => handleAltChange(image.id, val)} 
-                     placeholder="Describe this image for SEO..." 
-                   /> 
-                   <fetcher.Form method="post"> 
-                     <input type="hidden" name="imageId" value={image.id} /> 
-                     <input type="hidden" name="productId" value={product.id} /> 
-                     <input type="hidden" name="altText" value={altTexts[image.id] ?? image.altText ?? ""} /> 
-                     <Button submit variant="primary" size="slim">Save</Button> 
-                   </fetcher.Form> 
-                 </InlineGrid> 
-               ))} 
-             </BlockStack> 
-           </Card> 
-         </Layout.Section> 
-       ))} 
+       <Layout.Section> 
+         <Card> 
+           <BlockStack gap="400"> 
+             <Text variant="headingMd">Scan your store for broken links</Text> 
+             <Button variant="primary" onClick={scanLinks} loading={scanning}> 
+               {scanning ? "Scanning..." : "Start Scan"} 
+             </Button> 
+             {scanning && <Spinner size="large" />} 
+             {results.length > 0 && ( 
+               <> 
+                 <Text> 
+                   Found {results.filter(r => r.broken).length} broken links 
+                   out of {results.length} total links scanned. 
+                 </Text> 
+                 <DataTable 
+                   columnContentTypes={["text", "text", "text"]} 
+                   headings={["Source Page", "URL", "Status"]} 
+                   rows={rows} 
+                 /> 
+               </> 
+             )} 
+             {results.length === 0 && !scanning && ( 
+               <Text tone="subdued">Click "Start Scan" to check for broken links.</Text> 
+             )} 
+           </BlockStack> 
+         </Card> 
+       </Layout.Section> 
      </Layout> 
    </Page> 
  ); 
 } 
- 
- 
-
  
