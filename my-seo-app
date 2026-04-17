@@ -1,10 +1,14 @@
-// Add to your NavMenu 
+// Complete NavMenu with all routes 
 <NavMenu> 
- <Link to="/app" rel="home">SEO Dashboard</Link> 
- <Link to="/app/meta-editor">Meta Tags Editor</Link> 
- <Link to="/app/seo-checker">SEO Checker</Link> 
- <Link to="/app/sitemap">Sitemap</Link> 
+ <Link to="/app" rel="home">📊 SEO Dashboard</Link> 
+ <Link to="/app/meta-editor">✏️ Meta Tags Editor</Link> 
+ <Link to="/app/alt-text">🖼️ Alt Text Editor</Link> 
+ <Link to="/app/broken-links">🔗 Broken Links</Link> 
+ <Link to="/app/sitemap">🗺️ Sitemap Generator</Link> 
+ <Link to="/app/structured-data">📋 JSON-LD Schema</Link> 
+ <Link to="/app/keywords">🔍 Keyword Checker</Link> 
 </NavMenu> 
+ 
  
 
  
