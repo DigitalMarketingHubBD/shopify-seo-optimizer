@@ -1,9 +1,9 @@
 import { useState } from "react"; 
-import { useLoaderData } from "@remix-run/react"; 
+import { useLoaderData, useFetcher } from "@remix-run/react"; 
 import { authenticate } from "../shopify.server"; 
 import { 
  Page, Layout, Card, BlockStack, Text, 
- Button, Badge, DataTable, Spinner 
+ Select, Button, Badge 
 } from "@shopify/polaris"; 
 import { json } from "@remix-run/node"; 
  
@@ -11,110 +11,77 @@ export const loader = async ({ request }) => {
 const { admin } = await authenticate.admin(request); 
  const response = await admin.graphql(` 
    query { 
-     products(first: 50) { 
+     products(first: 20) { 
        edges { 
          node { 
-           id 
-           title 
-           handle 
-           onlineStoreUrl 
-         } 
-       } 
-     } 
-     pages(first: 20) { 
-       edges { 
-         node { 
-           id 
-           title 
-           handle 
-           body 
+           id title handle 
+           description 
+           priceRangeV2 { 
+             minVariantPrice { amount currencyCode } 
+           } 
+           images(first: 1) { 
+             edges { node { url } } 
+           } 
          } 
        } 
      } 
    } 
  `); 
  const data = await response.json(); 
- return json({ 
-   products: data.data.products.edges.map(e => e.node), 
-   pages: data.data.pages.edges.map(e => e.node), 
- }); 
+ return json({ products: data.data.products.edges.map(e => e.node) }); 
 }; 
  
-// Check if a URL returns 404 
-async function checkUrl(url) { 
- try { 
-   const res = await fetch(url, { method: "HEAD" }); 
-   return res.status; 
- } catch { 
-   return "Error"; 
- } 
-} 
+export default function StructuredData() { 
+ const { products } = useLoaderData(); 
+ const [selected, setSelected] = useState(products[0]?.id); 
  
-export default function BrokenLinks() { 
- const { products, pages } = useLoaderData(); 
- const [scanning, setScanning] = useState(false); 
- const [results, setResults] = useState([]); 
+ const product = products.find(p => p.id === selected); 
  
- const scanLinks = async () => { 
-   setScanning(true); 
-   const checks = []; 
+ const jsonLD = product ? JSON.stringify({ 
+   "@context": "https://schema.org/", 
+   "@type": "Product", 
+   "name": product.title, 
+   "description": product.description, 
+   "image": product.images.edges[0]?.node.url, 
+   "url": `https://yourstore.com/products/${product.handle}`, 
+   "offers": { 
+     "@type": "Offer", 
+     "price": product.priceRangeV2.minVariantPrice.amount, 
+     "priceCurrency": product.priceRangeV2.minVariantPrice.currencyCode, 
+     "availability": "https://schema.org/InStock" 
+   } 
+ }, null, 2) : ""; 
  
-   // Extract links from page bodies 
-   pages.forEach(page => { 
-     const matches = page.body?.match(/href="(https?:\/\/[^"]+)"/g) || []; 
-     matches.forEach(match => { 
-       const url = match.replace(/href="|"/g, ""); 
-       checks.push({ source: page.title, url }); 
-     }); 
-   }); 
- 
-   // Check each URL 
-   const checkedResults = await Promise.all( 
-     checks.map(async ({ source, url }) => { 
-       const status = await checkUrl(url); 
-       return { source, url, status, broken: status === 404 || status === "Error" }; 
-     }) 
-   ); 
- 
-   setResults(checkedResults); 
-   setScanning(false); 
+ const copyScript = () => { 
+   const script = `<script type="application/ld+json">\n${jsonLD}\n</script>`; 
+   navigator.clipboard.writeText(script); 
  }; 
  
- const rows = results.map(r => [ 
-   r.source, 
-   r.url.length > 40 ? r.url.substring(0, 40) + "..." : r.url, 
-   <Badge tone={r.broken ? "critical" : "success"}> 
-     {r.broken ? `❌ ${r.status}` : `✅ ${r.status}`} 
-   </Badge> 
- ]); 
- 
  return ( 
-   <Page title="Broken Link Scanner"> 
+   <Page title="JSON-LD Structured Data"> 
      <Layout> 
        <Layout.Section> 
          <Card> 
            <BlockStack gap="400"> 
-             <Text variant="headingMd">Scan your store for broken links</Text> 
-             <Button variant="primary" onClick={scanLinks} loading={scanning}> 
-               {scanning ? "Scanning..." : "Start Scan"} 
+             <Text variant="headingMd">Generate Product Schema Markup</Text> 
+             <Select 
+               label="Select Product" 
+               options={products.map(p => ({ label: p.title, value: p.id }))} 
+               onChange={setSelected} 
+               value={selected} 
+             /> 
+             <Badge tone="success">✅ Schema.org Product Type</Badge> 
+             <div style={{ background: "#1e1e1e", padding: "16px", borderRadius: "8px" }}> 
+               <pre style={{ color: "#d4d4d4", fontSize: "12px", margin: 0, overflow: "auto" }}> 
+                 {jsonLD} 
+               </pre> 
+             </div> 
+             <Button variant="primary" onClick={copyScript}> 
+               📋 Copy Script Tag 
              </Button> 
-             {scanning && <Spinner size="large" />} 
-             {results.length > 0 && ( 
-               <> 
-                 <Text> 
-                   Found {results.filter(r => r.broken).length} broken links 
-                   out of {results.length} total links scanned. 
-                 </Text> 
-                 <DataTable 
-                   columnContentTypes={["text", "text", "text"]} 
-                   headings={["Source Page", "URL", "Status"]} 
-                   rows={rows} 
-                 /> 
-               </> 
-             )} 
-             {results.length === 0 && !scanning && ( 
-               <Text tone="subdued">Click "Start Scan" to check for broken links.</Text> 
-             )} 
+             <Text tone="subdued"> 
+               Paste this inside your theme's {"<head>"} tag or use a Script Tag API to inject it automatically. 
+             </Text> 
            </BlockStack> 
          </Card> 
        </Layout.Section> 
